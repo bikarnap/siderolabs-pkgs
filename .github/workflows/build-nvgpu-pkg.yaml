@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -38,16 +38,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install bldr
-        run: |
-          curl -fsSL https://github.com/siderolabs/bldr/releases/download/v0.5.6/bldr-linux-arm64 \
-            -o /usr/local/bin/bldr
-          chmod +x /usr/local/bin/bldr
-
       - name: Build nvgpu-pkg
         run: |
-          bldr build \
-            --target nvgpu-pkg \
-            --platform linux/arm64 \
+          docker buildx build \
+            --file=Pkgfile \
+            --target=nvgpu-pkg \
+            --platform=linux/arm64 \
+            --provenance=false \
+            --progress=plain \
             --push \
-            --tag ghcr.io/${{ github.repository_owner }}/nvgpu-pkg:${{ github.sha }}
+            --tag=ghcr.io/${{ github.repository_owner }}/nvgpu-pkg:${{ github.sha }} \
+            .

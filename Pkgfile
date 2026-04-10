@@ -96,6 +96,10 @@ vars:
   linux_sha256: f4855f382c1b735c84072bdef36db5bcd5dc7b0c37e42f5104317149a0a486ef
   linux_sha512: 822877e5bcf330752a8c5ececac54e547ebbcd4e9025d0c37880c313d712ddda0df28ace858db4582a3fd3cf82d7c90a3c157a9a7561017d558231e9bd73c180
 
+  # NVIDIA Jetson Linux 36.5 (JetPack 6.2.2) public sources - for nvgpu OOT build
+  l4t_r365_sha256: 2c177804679e3ed650dabec6fa958388579896f170570c6171a1b6c386669216
+  l4t_r365_sha512: 31e3d67c46edc6f6b8fc243d314e3859b685e2e928bf95b71200776f689a8ee9d5a64ec44c361f6dac702ba7d285c5595b306e315fbaa1e11e54adf4888ce446
+
   # renovate: datasource=git-tags extractVersion=^libaio-(?<version>.*)$ depName=https://pagure.io/libaio.git
   libaio_version: 0.3.113
   libaio_sha256: 2c44d1c5fd0d43752287c9ae1eb9c023f04ef848ea8d4aafa46e9aedb678200b

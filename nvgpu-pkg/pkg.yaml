@@ -1,0 +1,104 @@
+name: nvgpu-pkg
+variant: scratch
+shell: /bin/bash
+dependencies:
+  - stage: base
+  - stage: kernel-build
+steps:
+  - sources:
+      - url: https://developer.download.nvidia.com/embedded/L4T/r36_Release_v5.0/sources/public_sources.tbz2
+        destination: public_sources.tbz2
+        sha256: "{{ .l4t_r365_sha256 }}"
+        sha512: "{{ .l4t_r365_sha512 }}"
+    env:
+      ARCH: arm64
+      CROSS_COMPILE: aarch64-linux-musl-
+    prepare:
+      - |
+        # Extract kernel_oot_modules_src.tbz2 from the outer archive
+        tar -xjf public_sources.tbz2 Linux_for_Tegra/source/kernel_oot_modules_src.tbz2
+        mkdir -p /oot
+        tar -xjf Linux_for_Tegra/source/kernel_oot_modules_src.tbz2 -C /oot
+        # Resulting layout: /oot/{Makefile,hwpm,nvidia-oot,nvgpu,...}
+    build:
+      - |
+        KERNELRELEASE=$(cat /src/include/config/kernel.release)
+        MAKEFILE_DIR=/oot
+        NVIDIA_CONFTEST=/oot/out/nvidia-conftest
+
+        # Step 1: Generate conftest.h by probing the built kernel source
+        mkdir -p ${NVIDIA_CONFTEST}/nvidia
+        cp -av ${MAKEFILE_DIR}/nvidia-oot/scripts/conftest/* ${NVIDIA_CONFTEST}/nvidia/
+        make -j $(nproc) ARCH=arm64 \
+          src=${NVIDIA_CONFTEST}/nvidia \
+          obj=${NVIDIA_CONFTEST}/nvidia \
+          CC=${CROSS_COMPILE}gcc \
+          LD=${CROSS_COMPILE}ld \
+          NV_KERNEL_SOURCES=/src \
+          NV_KERNEL_OUTPUT=/src \
+          -f ${NVIDIA_CONFTEST}/nvidia/Makefile
+
+        # Step 2: hwpm
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${MAKEFILE_DIR}/hwpm/drivers/tegra/hwpm \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          srctree.hwpm=${MAKEFILE_DIR}/hwpm \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          CROSS_COMPILE=${CROSS_COMPILE} \
+          modules
+
+        # Step 3: nvidia-oot (needs hwpm Module.symvers)
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${MAKEFILE_DIR}/nvidia-oot \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          srctree.nvidia-oot=${MAKEFILE_DIR}/nvidia-oot \
+          srctree.hwpm=${MAKEFILE_DIR}/hwpm \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          KBUILD_EXTRA_SYMBOLS=${MAKEFILE_DIR}/hwpm/drivers/tegra/hwpm/Module.symvers \
+          CROSS_COMPILE=${CROSS_COMPILE} \
+          modules
+
+        # Step 4: nvgpu (needs nvidia-oot Module.symvers)
+        make -j $(nproc) ARCH=arm64 \
+          -C /src \
+          M=${MAKEFILE_DIR}/nvgpu/drivers/gpu/nvgpu \
+          CONFIG_TEGRA_OOT_MODULE=m \
+          srctree.nvidia=${MAKEFILE_DIR}/nvidia-oot \
+          srctree.nvidia-oot=${MAKEFILE_DIR}/nvidia-oot \
+          srctree.nvconftest=${NVIDIA_CONFTEST} \
+          KBUILD_EXTRA_SYMBOLS=${MAKEFILE_DIR}/nvidia-oot/Module.symvers \
+          CROSS_COMPILE=${CROSS_COMPILE} \
+          modules
+    install:
+      - |
+        KERNELRELEASE=$(cat /src/include/config/kernel.release)
+        MODDIR=/rootfs/usr/lib/modules/${KERNELRELEASE}/extras/nvgpu
+
+        mkdir -p ${MODDIR}
+
+        # Copy all built .ko files
+        find /oot/hwpm -name '*.ko' -exec cp {} ${MODDIR}/ \;
+        find /oot/nvidia-oot -name '*.ko' -exec cp {} ${MODDIR}/ \;
+        find /oot/nvgpu -name '*.ko' -exec cp {} ${MODDIR}/ \;
+
+        # CONFIG_MODULE_SIG_ALL=y signs modules during build; verify and
+        # fallback-sign any that were missed
+        find ${MODDIR} -name '*.ko' | while read ko; do
+          if ! grep -qF '~Module signature appended~' "${ko}"; then
+            echo "Signing ${ko}"
+            /src/scripts/sign-file sha512 \
+              /src/certs/signing_key.pem \
+              /src/certs/signing_key.x509 \
+              "${ko}"
+          fi
+        done
+    test:
+      - |
+        find /rootfs/usr/lib/modules -name '*.ko' -exec grep -FL '~Module signature appended~' {} \+
+      - |
+        fhs-validator /rootfs
+finalize:
+  - from: /rootfs
+    to: /
